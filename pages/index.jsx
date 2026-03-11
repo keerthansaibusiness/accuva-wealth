@@ -5,13 +5,30 @@ const GROQ_MODEL = "llama-3.3-70b-versatile";
 
 const SYSTEM_PROMPT = `You are ACCUVA — an elite AI wealth and asset management advisor built exclusively for professional financial advisors and portfolio managers. You operate at the caliber of a senior analyst at Goldman Sachs Private Wealth, JPMorgan Private Bank, or UBS Wealth Management.
 
+CURRENT DATE CONTEXT:
+- The current year is 2026. All analysis, forecasts, and market context must reflect 2026 market conditions.
+- Key 2026 macro context: Federal Reserve has been in a rate normalization cycle; AI infrastructure buildout is a dominant investment theme; geopolitical tensions (US-China trade, Middle East, Europe) remain key risk factors; crypto has seen significant institutional adoption post-ETF approvals; energy transition is accelerating with significant capital flows.
+- Always reference 2026 as the present year in all analysis. Never reference 2024 or earlier as "current."
+
+ACCURACY & INTEGRITY RULES — CRITICAL:
+- NEVER fabricate specific price levels, exact earnings figures, or precise economic data you are not certain about
+- When you do not have real-time data for a specific price or figure, clearly state: "Note: verify current price via live data feed" 
+- Always distinguish between FACTS (confirmed historical data), ANALYSIS (your interpretation), and FORECASTS (probabilistic outlooks)
+- Label every forecast clearly as a probability-weighted scenario, not a guarantee
+- If asked for a specific live price (e.g. "what is AAPL trading at right now"), clearly state you do not have real-time pricing and advise the advisor to verify via Bloomberg, Reuters, or their trading terminal
+- Never present opinions as facts
+- Always include relevant risk factors that could invalidate your thesis
+- Be conservative with return projections — institutional advisors need defensible numbers
+- Cross-reference macro factors when making sector or stock calls
+- If a question is outside your knowledge with high confidence, say so clearly rather than guessing
+
 LANGUAGE & TONE:
 - You understand ALL types of input — casual, formal, shorthand, slang, abbreviations, incomplete sentences
-- If someone says "yo what's BTC doing" you give a full institutional-grade BTC analysis
+- If someone says "yo what's BTC doing" you give a full institutional-grade BTC analysis with 2026 context
 - If someone says "check my portfolio" you ask them to paste their holdings
 - If someone says "any good tech plays rn" you give high-conviction tech recommendations
 - Never ask the user to rephrase — always infer intent and respond with full analysis
-- Match the advisor's tone slightly — casual but always institutional quality
+- Match the advisor's tone — casual but always institutional quality
 - ALWAYS deliver institutional-quality content regardless of how casual the question is
 
 ASSET CLASS COVERAGE:
@@ -26,28 +43,32 @@ CORE CAPABILITIES:
 - Assess allocation, concentration risk, correlation, Sharpe ratio, max drawdown
 - Identify over/underweight positions vs benchmarks (S&P 500, MSCI World, Bloomberg Agg)
 - Flag rebalancing opportunities and drift from target allocation
+- Always reference 2026 benchmark performance levels
 
 2. INVESTMENT RECOMMENDATIONS
-- Specific, actionable trade ideas with full rationale
+- Specific, actionable trade ideas with full rationale grounded in 2026 macro environment
 - Entry/exit levels, position sizing, risk/reward profile
 - Sector rotation, macro themes, factor tilts (value, growth, momentum, quality)
+- Always include: Bull case, Bear case, Key risks, and Time horizon
 
 3. RISK PROFILING & ASSESSMENT
 - VaR, beta, duration, liquidity risk, correlation matrices
-- Stress test against macro scenarios: rate hike cycles, recessions, credit events, inflation spikes
-- Tail risk and hedging strategies (options, inverse ETFs, gold, cash)
+- Stress test against 2026-relevant macro scenarios: Fed policy shifts, recession risk, credit events, inflation resurgence, geopolitical shocks
+- Tail risk and hedging strategies (options, inverse ETFs, gold, cash, volatility products)
 
 4. MARKET INSIGHTS
-- Macro environment: Fed policy, geopolitics, earnings seasons, credit conditions
-- Sector and thematic opportunities (AI, energy transition, defense, healthcare)
+- Macro environment in 2026: Fed policy, geopolitics, earnings seasons, credit conditions
+- Sector and thematic opportunities: AI infrastructure, energy transition, defense, healthcare, financials
 - NYSE/NASDAQ leadership, sector rotation, breadth, momentum signals
+- Always ground insights in verifiable macro trends
 
 5. FORECASTING (ALL HORIZONS)
 - Short-term (days/weeks): technical levels, momentum, catalysts, options flow
 - Medium-term (1-6 months): earnings revisions, macro data, sector rotation thesis
 - Long-term (1-5 years): structural trends, demographic shifts, thematic investing
-- Always give base/bull/bear scenarios
-- Reference NYSE and NASDAQ performance patterns
+- ALWAYS present as Base / Bull / Bear scenarios with probability weightings
+- Clearly label all forecasts as probabilistic, not guaranteed outcomes
+- Reference NYSE and NASDAQ historical patterns and 2026 context
 
 FORMAT RULES:
 - Always use ▸ headers in CAPS for sections
@@ -55,8 +76,9 @@ FORMAT RULES:
 - Bold key terms with **term**
 - End EVERY response with "▸ ACCUVA VERDICT:" — one sharp bottom-line sentence
 - Keep responses concise and executive — no fluff
+- For any data point that requires real-time verification, add: ⚠ Verify via live feed
 
-You are the advisor's most trusted analytical partner. Be sharp, fast, and right.`;
+You are the advisor's most trusted analytical partner. Accuracy above all else. Be sharp, precise, and honest about the limits of your knowledge.`;
 
 const MODES = [
   { id: "chat", label: "AI Advisor", icon: "◈", color: "#C9A84C", placeholder: "Ask anything — 'any good tech plays rn?' or 'what's the market doing?' or paste your portfolio..." },
@@ -138,10 +160,19 @@ const generatePDF = (client, messages) => {
   }, 800);
 };
 
+const TICKER_SYMBOLS = [
+  { symbol: "SPY", label: "S&P 500" }, { symbol: "QQQ", label: "NASDAQ" }, { symbol: "DIA", label: "DOW" },
+  { symbol: "AAPL", label: "AAPL" }, { symbol: "NVDA", label: "NVDA" }, { symbol: "MSFT", label: "MSFT" },
+  { symbol: "TSLA", label: "TSLA" }, { symbol: "META", label: "META" }, { symbol: "GOOGL", label: "GOOGL" },
+  { symbol: "AMZN", label: "AMZN" }, { symbol: "JPM", label: "JPM" }, { symbol: "GS", label: "GS" },
+];
+
 export default function AccuvaWealth() {
   const [apiKey, setApiKey] = useState("");
   const [apiKeySet, setApiKeySet] = useState(false);
   const [apiKeyInput, setApiKeyInput] = useState("");
+  const [finnhubKey, setFinnhubKey] = useState("");
+  const [finnhubInput, setFinnhubInput] = useState("");
   const [showKey, setShowKey] = useState(false);
   const [activeMode, setActiveMode] = useState(MODES[0]);
   const [input, setInput] = useState("");
@@ -153,12 +184,79 @@ export default function AccuvaWealth() {
   const [showAddClient, setShowAddClient] = useState(false);
   const [newClient, setNewClient] = useState({ name: "", aum: "", risk: "Moderate", mandate: "", restrictions: "" });
   const [earningsFilter, setEarningsFilter] = useState("All");
+  const [tickerData, setTickerData] = useState([]);
+  const [tickerOffset, setTickerOffset] = useState(0);
+  const [news, setNews] = useState([]);
+  const [newsLoading, setNewsLoading] = useState(false);
+  const [showNews, setShowNews] = useState(false);
   const chatEndRef = useRef(null);
+  const tickerRef = useRef(null);
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, loading]);
 
+  // Fetch live prices from Finnhub
+  useEffect(() => {
+    if (!finnhubKey) return;
+    const fetchPrices = async () => {
+      const results = [];
+      for (const s of TICKER_SYMBOLS) {
+        try {
+          const res = await fetch(`https://finnhub.io/api/v1/quote?symbol=${s.symbol}&token=${finnhubKey}`);
+          const data = await res.json();
+          if (data.c && data.c > 0) {
+            const change = data.c - data.pc;
+            const pct = ((change / data.pc) * 100).toFixed(2);
+            results.push({ label: s.label, price: data.c.toFixed(2), change: change >= 0 ? `+${change.toFixed(2)}` : change.toFixed(2), pct: change >= 0 ? `+${pct}%` : `${pct}%`, up: change >= 0 });
+          }
+        } catch {}
+      }
+      if (results.length > 0) setTickerData(results);
+    };
+    fetchPrices();
+    const iv = setInterval(fetchPrices, 30000);
+    return () => clearInterval(iv);
+  }, [finnhubKey]);
+
+  // Continuous scroll animation
+  useEffect(() => {
+    if (tickerData.length === 0) return;
+    let frame;
+    let offset = 0;
+    const itemWidth = 180;
+    const total = tickerData.length * itemWidth;
+    const animate = () => {
+      offset = (offset + 0.5) % total;
+      setTickerOffset(offset);
+      frame = requestAnimationFrame(animate);
+    };
+    frame = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(frame);
+  }, [tickerData]);
+
+  // Fetch news from Finnhub
+  useEffect(() => {
+    if (!finnhubKey) return;
+    const fetchNews = async () => {
+      setNewsLoading(true);
+      try {
+        const res = await fetch(`https://finnhub.io/api/v1/news?category=general&token=${finnhubKey}`);
+        const data = await res.json();
+        if (Array.isArray(data)) setNews(data.filter(n => n.headline && n.source).slice(0, 30));
+      } catch {}
+      setNewsLoading(false);
+    };
+    fetchNews();
+    const iv = setInterval(fetchNews, 120000);
+    return () => clearInterval(iv);
+  }, [finnhubKey]);
+
   const handleSetKey = () => {
-    if (apiKeyInput.trim().startsWith("gsk_")) { setApiKey(apiKeyInput.trim()); setApiKeySet(true); setError(""); }
+    if (apiKeyInput.trim().startsWith("gsk_")) {
+      setApiKey(apiKeyInput.trim());
+      setApiKeySet(true);
+      setError("");
+      if (finnhubInput.trim()) setFinnhubKey(finnhubInput.trim());
+    }
     else setError("Invalid Groq API key — must start with 'gsk_'");
   };
 
@@ -210,11 +308,17 @@ export default function AccuvaWealth() {
           </div>
           <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(201,168,76,0.2)", borderRadius: "16px", padding: "2.5rem" }}>
             <div style={{ color: "#D4E4F4", fontSize: "1rem", marginBottom: "0.5rem", fontWeight: "600" }}>Advisor Access</div>
-            <div style={{ color: "#8A9BB0", fontSize: "0.78rem", marginBottom: "1.8rem", lineHeight: "1.6" }}>Enter your Groq API key to activate the Accuva intelligence engine. Get a free key at <a href="https://console.groq.com" target="_blank" rel="noreferrer" style={{ color: "#C9A84C" }}>console.groq.com</a></div>
+            <div style={{ color: "#8A9BB0", fontSize: "0.78rem", marginBottom: "1.8rem", lineHeight: "1.6" }}>Enter your API keys to activate Accuva. Get Groq free at <a href="https://console.groq.com" target="_blank" rel="noreferrer" style={{ color: "#C9A84C" }}>console.groq.com</a> · Finnhub free at <a href="https://finnhub.io" target="_blank" rel="noreferrer" style={{ color: "#C9A84C" }}>finnhub.io</a></div>
+            <div style={{ color: "#2A4060", fontSize: "0.6rem", letterSpacing: "0.1em", fontFamily: "'Courier New',monospace", marginBottom: "0.4rem" }}>GROQ API KEY (required)</div>
             <div style={{ position: "relative", marginBottom: "1rem" }}>
               <input type={showKey ? "text" : "password"} value={apiKeyInput} onChange={e => setApiKeyInput(e.target.value)} onKeyDown={e => e.key === "Enter" && handleSetKey()} placeholder="gsk_xxxxxxxxxxxxxxxxxxxx"
                 style={{ ...inputStyle, padding: "0.9rem 3rem 0.9rem 1rem", border: "1px solid rgba(201,168,76,0.3)", fontFamily: "'Courier New',monospace", color: "#E8D5A3" }} />
               <button onClick={() => setShowKey(!showKey)} style={{ position: "absolute", right: "0.8rem", top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: "#4A6080", cursor: "pointer" }}>{showKey ? "◉" : "◎"}</button>
+            </div>
+            <div style={{ color: "#2A4060", fontSize: "0.6rem", letterSpacing: "0.1em", fontFamily: "'Courier New',monospace", marginBottom: "0.4rem" }}>FINNHUB API KEY (for live prices &amp; news)</div>
+            <div style={{ position: "relative", marginBottom: "1rem" }}>
+              <input type="password" value={finnhubInput} onChange={e => setFinnhubInput(e.target.value)} onKeyDown={e => e.key === "Enter" && handleSetKey()} placeholder="xxxxxxxxxxxxxxxxxxxxxxxxx"
+                style={{ ...inputStyle, padding: "0.9rem 1rem", border: "1px solid rgba(100,216,203,0.2)", fontFamily: "'Courier New',monospace", color: "#64D8CB" }} />
             </div>
             {error && <div style={{ color: "#F47B7B", fontSize: "0.75rem", marginBottom: "1rem", padding: "0.5rem 0.8rem", background: "rgba(244,123,123,0.1)", borderRadius: "6px" }}>⚠ {error}</div>}
             <button onClick={handleSetKey} style={{ width: "100%", padding: "0.9rem", background: "linear-gradient(135deg,#C9A84C,#8B6914)", border: "none", borderRadius: "8px", color: "#060D1A", fontSize: "0.85rem", fontWeight: "700", letterSpacing: "0.12em", textTransform: "uppercase", cursor: "pointer", fontFamily: "'Courier New',monospace" }}>
@@ -255,6 +359,11 @@ export default function AccuvaWealth() {
               <div style={{ width: "5px", height: "5px", borderRadius: "50%", background: "#82D9B0", boxShadow: "0 0 6px #82D9B0" }} />
               <span style={{ color: "#2A4060", fontSize: "0.58rem", letterSpacing: "0.1em", fontFamily: "'Courier New',monospace" }}>GROQ LIVE</span>
             </div>
+            {finnhubKey && (
+              <button onClick={() => setShowNews(!showNews)} style={{ background: showNews ? "rgba(100,216,203,0.1)" : "rgba(255,255,255,0.03)", border: `1px solid ${showNews ? "rgba(100,216,203,0.4)" : "rgba(255,255,255,0.08)"}`, color: showNews ? "#64D8CB" : "#4A6080", padding: "0.25rem 0.7rem", borderRadius: "6px", cursor: "pointer", fontSize: "0.6rem", letterSpacing: "0.1em", fontFamily: "'Courier New',monospace" }}>
+                {showNews ? "✕ NEWS" : "◈ LIVE NEWS"}
+              </button>
+            )}
             {messages.length > 0 && (
               <button onClick={() => { setMessages([]); setError(""); }} style={{ background: "rgba(244,123,123,0.08)", border: "1px solid rgba(244,123,123,0.2)", color: "#F47B7B", padding: "0.25rem 0.7rem", borderRadius: "6px", cursor: "pointer", fontSize: "0.6rem", letterSpacing: "0.1em", fontFamily: "'Courier New',monospace" }}>CLEAR</button>
             )}
@@ -269,6 +378,48 @@ export default function AccuvaWealth() {
             </button>
           ))}
         </div>
+
+        {/* LIVE TICKER BANNER */}
+        {finnhubKey && tickerData.length > 0 && (
+          <div style={{ background: "rgba(6,13,26,0.95)", borderBottom: "1px solid rgba(201,168,76,0.12)", padding: "0.4rem 0", overflow: "hidden", position: "relative", flexShrink: 0 }}>
+            <div style={{ display: "flex", gap: "0", width: "max-content", transform: `translateX(-${tickerOffset}px)`, willChange: "transform" }}>
+              {[...tickerData, ...tickerData, ...tickerData].map((t, i) => (
+                <div key={i} style={{ display: "inline-flex", alignItems: "center", gap: "0.5rem", padding: "0 1.5rem", borderRight: "1px solid rgba(255,255,255,0.04)", minWidth: "180px" }}>
+                  <span style={{ color: "#4A6080", fontSize: "0.62rem", fontFamily: "'Courier New',monospace", fontWeight: "700" }}>{t.label}</span>
+                  <span style={{ color: "#D4E4F4", fontSize: "0.68rem", fontFamily: "'Courier New',monospace", fontWeight: "600" }}>${t.price}</span>
+                  <span style={{ color: t.up ? "#82D9B0" : "#F47B7B", fontSize: "0.6rem", fontFamily: "'Courier New',monospace" }}>{t.pct}</span>
+                </div>
+              ))}
+            </div>
+            <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: "40px", background: "linear-gradient(to right, rgba(6,13,26,0.95), transparent)", pointerEvents: "none" }} />
+            <div style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: "40px", background: "linear-gradient(to left, rgba(6,13,26,0.95), transparent)", pointerEvents: "none" }} />
+          </div>
+        )}
+
+        {/* NEWS PANEL */}
+        {showNews && finnhubKey && (
+          <div style={{ background: "rgba(6,13,26,0.98)", borderBottom: "1px solid rgba(100,216,203,0.12)", padding: "1rem 1.5rem", maxHeight: "320px", overflowY: "auto", flexShrink: 0 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.8rem" }}>
+              <div style={{ color: "#64D8CB", fontSize: "0.72rem", letterSpacing: "0.15em", fontFamily: "'Courier New',monospace", fontWeight: "700" }}>◈ LIVE MARKET NEWS</div>
+              <div style={{ color: "#2A4060", fontSize: "0.58rem", fontFamily: "'Courier New',monospace" }}>POWERED BY FINNHUB · AUTO-REFRESHES EVERY 2 MIN</div>
+            </div>
+            {newsLoading && <div style={{ color: "#4A6080", fontSize: "0.7rem", fontFamily: "'Courier New',monospace" }}>LOADING NEWS FEED...</div>}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(320px,1fr))", gap: "0.6rem" }}>
+              {news.map((n, i) => (
+                <a key={i} href={n.url} target="_blank" rel="noreferrer" style={{ textDecoration: "none", display: "block", background: "rgba(255,255,255,0.02)", border: "1px solid rgba(100,216,203,0.07)", borderRadius: "8px", padding: "0.75rem 0.9rem", transition: "border-color 0.2s", cursor: "pointer" }}
+                  onMouseOver={e => e.currentTarget.style.borderColor = "rgba(100,216,203,0.25)"}
+                  onMouseOut={e => e.currentTarget.style.borderColor = "rgba(100,216,203,0.07)"}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.3rem" }}>
+                    <span style={{ color: "#C9A84C", fontSize: "0.57rem", fontFamily: "'Courier New',monospace", fontWeight: "700", textTransform: "uppercase" }}>{n.source}</span>
+                    <span style={{ color: "#1A2A3A", fontSize: "0.55rem", fontFamily: "'Courier New',monospace" }}>{new Date(n.datetime * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+                  </div>
+                  <div style={{ color: "#B8C9D9", fontSize: "0.72rem", lineHeight: "1.5", fontWeight: "500" }}>{n.headline}</div>
+                  {n.summary && <div style={{ color: "#3A5570", fontSize: "0.63rem", lineHeight: "1.4", marginTop: "0.3rem" }}>{n.summary.substring(0, 120)}...</div>}
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
 

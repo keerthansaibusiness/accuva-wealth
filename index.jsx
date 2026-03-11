@@ -160,10 +160,19 @@ const generatePDF = (client, messages) => {
   }, 800);
 };
 
+const TICKER_SYMBOLS = [
+  { symbol: "SPY", label: "S&P 500" }, { symbol: "QQQ", label: "NASDAQ" }, { symbol: "DIA", label: "DOW" },
+  { symbol: "AAPL", label: "AAPL" }, { symbol: "NVDA", label: "NVDA" }, { symbol: "MSFT", label: "MSFT" },
+  { symbol: "TSLA", label: "TSLA" }, { symbol: "META", label: "META" }, { symbol: "GOOGL", label: "GOOGL" },
+  { symbol: "AMZN", label: "AMZN" }, { symbol: "JPM", label: "JPM" }, { symbol: "GS", label: "GS" },
+];
+
 export default function AccuvaWealth() {
   const [apiKey, setApiKey] = useState("");
   const [apiKeySet, setApiKeySet] = useState(false);
   const [apiKeyInput, setApiKeyInput] = useState("");
+  const [finnhubKey, setFinnhubKey] = useState("");
+  const [finnhubInput, setFinnhubInput] = useState("");
   const [showKey, setShowKey] = useState(false);
   const [activeMode, setActiveMode] = useState(MODES[0]);
   const [input, setInput] = useState("");
@@ -175,12 +184,79 @@ export default function AccuvaWealth() {
   const [showAddClient, setShowAddClient] = useState(false);
   const [newClient, setNewClient] = useState({ name: "", aum: "", risk: "Moderate", mandate: "", restrictions: "" });
   const [earningsFilter, setEarningsFilter] = useState("All");
+  const [tickerData, setTickerData] = useState([]);
+  const [tickerOffset, setTickerOffset] = useState(0);
+  const [news, setNews] = useState([]);
+  const [newsLoading, setNewsLoading] = useState(false);
+  const [showNews, setShowNews] = useState(false);
   const chatEndRef = useRef(null);
+  const tickerRef = useRef(null);
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, loading]);
 
+  // Fetch live prices from Finnhub
+  useEffect(() => {
+    if (!finnhubKey) return;
+    const fetchPrices = async () => {
+      const results = [];
+      for (const s of TICKER_SYMBOLS) {
+        try {
+          const res = await fetch(`https://finnhub.io/api/v1/quote?symbol=${s.symbol}&token=${finnhubKey}`);
+          const data = await res.json();
+          if (data.c && data.c > 0) {
+            const change = data.c - data.pc;
+            const pct = ((change / data.pc) * 100).toFixed(2);
+            results.push({ label: s.label, price: data.c.toFixed(2), change: change >= 0 ? `+${change.toFixed(2)}` : change.toFixed(2), pct: change >= 0 ? `+${pct}%` : `${pct}%`, up: change >= 0 });
+          }
+        } catch {}
+      }
+      if (results.length > 0) setTickerData(results);
+    };
+    fetchPrices();
+    const iv = setInterval(fetchPrices, 30000);
+    return () => clearInterval(iv);
+  }, [finnhubKey]);
+
+  // Continuous scroll animation
+  useEffect(() => {
+    if (tickerData.length === 0) return;
+    let frame;
+    let offset = 0;
+    const itemWidth = 180;
+    const total = tickerData.length * itemWidth;
+    const animate = () => {
+      offset = (offset + 0.5) % total;
+      setTickerOffset(offset);
+      frame = requestAnimationFrame(animate);
+    };
+    frame = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(frame);
+  }, [tickerData]);
+
+  // Fetch news from Finnhub
+  useEffect(() => {
+    if (!finnhubKey) return;
+    const fetchNews = async () => {
+      setNewsLoading(true);
+      try {
+        const res = await fetch(`https://finnhub.io/api/v1/news?category=general&token=${finnhubKey}`);
+        const data = await res.json();
+        if (Array.isArray(data)) setNews(data.filter(n => n.headline && n.source).slice(0, 30));
+      } catch {}
+      setNewsLoading(false);
+    };
+    fetchNews();
+    const iv = setInterval(fetchNews, 120000);
+    return () => clearInterval(iv);
+  }, [finnhubKey]);
+
   const handleSetKey = () => {
-    if (apiKeyInput.trim().startsWith("gsk_")) { setApiKey(apiKeyInput.trim()); setApiKeySet(true); setError(""); }
+    if (apiKeyInput.trim().startsWith("gsk_")) {
+      setApiKey(apiKeyInput.trim());
+      setApiKeySet(true);
+      setError("");
+      if (finnhubInput.trim()) setFinnhubKey(finnhubInput.trim());
+    }
     else setError("Invalid Groq API key — must start with 'gsk_'");
   };
 
@@ -232,11 +308,17 @@ export default function AccuvaWealth() {
           </div>
           <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(201,168,76,0.2)", borderRadius: "16px", padding: "2.5rem" }}>
             <div style={{ color: "#D4E4F4", fontSize: "1rem", marginBottom: "0.5rem", fontWeight: "600" }}>Advisor Access</div>
-            <div style={{ color: "#8A9BB0", fontSize: "0.78rem", marginBottom: "1.8rem", lineHeight: "1.6" }}>Enter your Groq API key to activate the Accuva intelligence engine. Get a free key at <a href="https://console.groq.com" target="_blank" rel="noreferrer" style={{ color: "#C9A84C" }}>console.groq.com</a></div>
+            <div style={{ color: "#8A9BB0", fontSize: "0.78rem", marginBottom: "1.8rem", lineHeight: "1.6" }}>Enter your API keys to activate Accuva. Get Groq free at <a href="https://console.groq.com" target="_blank" rel="noreferrer" style={{ color: "#C9A84C" }}>console.groq.com</a> · Finnhub free at <a href="https://finnhub.io" target="_blank" rel="noreferrer" style={{ color: "#C9A84C" }}>finnhub.io</a></div>
+            <div style={{ color: "#2A4060", fontSize: "0.6rem", letterSpacing: "0.1em", fontFamily: "'Courier New',monospace", marginBottom: "0.4rem" }}>GROQ API KEY (required)</div>
             <div style={{ position: "relative", marginBottom: "1rem" }}>
               <input type={showKey ? "text" : "password"} value={apiKeyInput} onChange={e => setApiKeyInput(e.target.value)} onKeyDown={e => e.key === "Enter" && handleSetKey()} placeholder="gsk_xxxxxxxxxxxxxxxxxxxx"
                 style={{ ...inputStyle, padding: "0.9rem 3rem 0.9rem 1rem", border: "1px solid rgba(201,168,76,0.3)", fontFamily: "'Courier New',monospace", color: "#E8D5A3" }} />
               <button onClick={() => setShowKey(!showKey)} style={{ position: "absolute", right: "0.8rem", top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: "#4A6080", cursor: "pointer" }}>{showKey ? "◉" : "◎"}</button>
+            </div>
+            <div style={{ color: "#2A4060", fontSize: "0.6rem", letterSpacing: "0.1em", fontFamily: "'Courier New',monospace", marginBottom: "0.4rem" }}>FINNHUB API KEY (for live prices &amp; news)</div>
+            <div style={{ position: "relative", marginBottom: "1rem" }}>
+              <input type="password" value={finnhubInput} onChange={e => setFinnhubInput(e.target.value)} onKeyDown={e => e.key === "Enter" && handleSetKey()} placeholder="xxxxxxxxxxxxxxxxxxxxxxxxx"
+                style={{ ...inputStyle, padding: "0.9rem 1rem", border: "1px solid rgba(100,216,203,0.2)", fontFamily: "'Courier New',monospace", color: "#64D8CB" }} />
             </div>
             {error && <div style={{ color: "#F47B7B", fontSize: "0.75rem", marginBottom: "1rem", padding: "0.5rem 0.8rem", background: "rgba(244,123,123,0.1)", borderRadius: "6px" }}>⚠ {error}</div>}
             <button onClick={handleSetKey} style={{ width: "100%", padding: "0.9rem", background: "linear-gradient(135deg,#C9A84C,#8B6914)", border: "none", borderRadius: "8px", color: "#060D1A", fontSize: "0.85rem", fontWeight: "700", letterSpacing: "0.12em", textTransform: "uppercase", cursor: "pointer", fontFamily: "'Courier New',monospace" }}>
@@ -277,6 +359,11 @@ export default function AccuvaWealth() {
               <div style={{ width: "5px", height: "5px", borderRadius: "50%", background: "#82D9B0", boxShadow: "0 0 6px #82D9B0" }} />
               <span style={{ color: "#2A4060", fontSize: "0.58rem", letterSpacing: "0.1em", fontFamily: "'Courier New',monospace" }}>GROQ LIVE</span>
             </div>
+            {finnhubKey && (
+              <button onClick={() => setShowNews(!showNews)} style={{ background: showNews ? "rgba(100,216,203,0.1)" : "rgba(255,255,255,0.03)", border: `1px solid ${showNews ? "rgba(100,216,203,0.4)" : "rgba(255,255,255,0.08)"}`, color: showNews ? "#64D8CB" : "#4A6080", padding: "0.25rem 0.7rem", borderRadius: "6px", cursor: "pointer", fontSize: "0.6rem", letterSpacing: "0.1em", fontFamily: "'Courier New',monospace" }}>
+                {showNews ? "✕ NEWS" : "◈ LIVE NEWS"}
+              </button>
+            )}
             {messages.length > 0 && (
               <button onClick={() => { setMessages([]); setError(""); }} style={{ background: "rgba(244,123,123,0.08)", border: "1px solid rgba(244,123,123,0.2)", color: "#F47B7B", padding: "0.25rem 0.7rem", borderRadius: "6px", cursor: "pointer", fontSize: "0.6rem", letterSpacing: "0.1em", fontFamily: "'Courier New',monospace" }}>CLEAR</button>
             )}
@@ -291,6 +378,48 @@ export default function AccuvaWealth() {
             </button>
           ))}
         </div>
+
+        {/* LIVE TICKER BANNER */}
+        {finnhubKey && tickerData.length > 0 && (
+          <div style={{ background: "rgba(6,13,26,0.95)", borderBottom: "1px solid rgba(201,168,76,0.12)", padding: "0.4rem 0", overflow: "hidden", position: "relative", flexShrink: 0 }}>
+            <div style={{ display: "flex", gap: "0", width: "max-content", transform: `translateX(-${tickerOffset}px)`, willChange: "transform" }}>
+              {[...tickerData, ...tickerData, ...tickerData].map((t, i) => (
+                <div key={i} style={{ display: "inline-flex", alignItems: "center", gap: "0.5rem", padding: "0 1.5rem", borderRight: "1px solid rgba(255,255,255,0.04)", minWidth: "180px" }}>
+                  <span style={{ color: "#4A6080", fontSize: "0.62rem", fontFamily: "'Courier New',monospace", fontWeight: "700" }}>{t.label}</span>
+                  <span style={{ color: "#D4E4F4", fontSize: "0.68rem", fontFamily: "'Courier New',monospace", fontWeight: "600" }}>${t.price}</span>
+                  <span style={{ color: t.up ? "#82D9B0" : "#F47B7B", fontSize: "0.6rem", fontFamily: "'Courier New',monospace" }}>{t.pct}</span>
+                </div>
+              ))}
+            </div>
+            <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: "40px", background: "linear-gradient(to right, rgba(6,13,26,0.95), transparent)", pointerEvents: "none" }} />
+            <div style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: "40px", background: "linear-gradient(to left, rgba(6,13,26,0.95), transparent)", pointerEvents: "none" }} />
+          </div>
+        )}
+
+        {/* NEWS PANEL */}
+        {showNews && finnhubKey && (
+          <div style={{ background: "rgba(6,13,26,0.98)", borderBottom: "1px solid rgba(100,216,203,0.12)", padding: "1rem 1.5rem", maxHeight: "320px", overflowY: "auto", flexShrink: 0 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.8rem" }}>
+              <div style={{ color: "#64D8CB", fontSize: "0.72rem", letterSpacing: "0.15em", fontFamily: "'Courier New',monospace", fontWeight: "700" }}>◈ LIVE MARKET NEWS</div>
+              <div style={{ color: "#2A4060", fontSize: "0.58rem", fontFamily: "'Courier New',monospace" }}>POWERED BY FINNHUB · AUTO-REFRESHES EVERY 2 MIN</div>
+            </div>
+            {newsLoading && <div style={{ color: "#4A6080", fontSize: "0.7rem", fontFamily: "'Courier New',monospace" }}>LOADING NEWS FEED...</div>}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(320px,1fr))", gap: "0.6rem" }}>
+              {news.map((n, i) => (
+                <a key={i} href={n.url} target="_blank" rel="noreferrer" style={{ textDecoration: "none", display: "block", background: "rgba(255,255,255,0.02)", border: "1px solid rgba(100,216,203,0.07)", borderRadius: "8px", padding: "0.75rem 0.9rem", transition: "border-color 0.2s", cursor: "pointer" }}
+                  onMouseOver={e => e.currentTarget.style.borderColor = "rgba(100,216,203,0.25)"}
+                  onMouseOut={e => e.currentTarget.style.borderColor = "rgba(100,216,203,0.07)"}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.3rem" }}>
+                    <span style={{ color: "#C9A84C", fontSize: "0.57rem", fontFamily: "'Courier New',monospace", fontWeight: "700", textTransform: "uppercase" }}>{n.source}</span>
+                    <span style={{ color: "#1A2A3A", fontSize: "0.55rem", fontFamily: "'Courier New',monospace" }}>{new Date(n.datetime * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+                  </div>
+                  <div style={{ color: "#B8C9D9", fontSize: "0.72rem", lineHeight: "1.5", fontWeight: "500" }}>{n.headline}</div>
+                  {n.summary && <div style={{ color: "#3A5570", fontSize: "0.63rem", lineHeight: "1.4", marginTop: "0.3rem" }}>{n.summary.substring(0, 120)}...</div>}
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
 
